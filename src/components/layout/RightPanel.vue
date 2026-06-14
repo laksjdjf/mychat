@@ -1,12 +1,27 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
+import type { GenerationParams } from '../../types'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { usePersonaStore } from '../../stores/personaStore'
+import { useChatStore } from '../../stores/chatStore'
 import PersonaEditor from '../persona/PersonaEditor.vue'
 import PersonaSelector from '../persona/PersonaSelector.vue'
 
 const settingsStore = useSettingsStore()
 const personaStore = usePersonaStore()
+const chatStore = useChatStore()
+
+const gen = computed(() => settingsStore.generationParams)
+
+function setParam(patch: Partial<GenerationParams>) {
+  settingsStore.setGenerationParams(patch)
+}
+
+// max_tokens / seed は空欄で null（サーバー既定）にする
+function setNullableParam(key: 'maxTokens' | 'seed', value: string) {
+  const trimmed = value.trim()
+  settingsStore.setGenerationParams({ [key]: trimmed === '' ? null : Number(trimmed) })
+}
 
 const activeTab = ref<'persona' | 'system' | 'settings'>('persona')
 
@@ -21,10 +36,11 @@ const templateText = computed({
   },
 })
 
-const placeholderText = 'システムプロンプトを入力...\n' + '{{name}} {{personality}} {{scenario}} が使えます'
+const placeholderText = 'システムプロンプトを入力...\n{{name}} {{personality}} {{scenario}} が使えます'
 
 const availablePlaceholders = computed(() => {
-  const persona = personaStore.activePersona
+  const persona =
+    personaStore.getPersonaById(chatStore.activeSession?.personaId) ?? personaStore.activePersona
   if (!persona) return []
   const keys = ['name', 'personality', 'scenario']
   if (persona.customFields) {
@@ -32,6 +48,10 @@ const availablePlaceholders = computed(() => {
   }
   return keys
 })
+
+const previewSystemPrompt = computed(() =>
+  settingsStore.resolveSystemPrompt(chatStore.activeSession?.personaId ?? personaStore.activePersonaId)
+)
 
 function handleCreateTemplate() {
   const tpl = settingsStore.createTemplate({ name: '新しいテンプレート', template: '' })
@@ -167,7 +187,7 @@ function handleImportFile(e: Event) {
 
       <label class="field-label">プレビュー</label>
       <div class="preview-box">
-        {{ settingsStore.resolvedSystemPrompt || '(空)' }}
+        {{ previewSystemPrompt || '(空)' }}
       </div>
     </div>
 
@@ -180,6 +200,79 @@ function handleImportFile(e: Event) {
         class="text-input"
         placeholder="http://localhost:8080"
       />
+
+      <label class="field-label" style="margin-top: 24px;">生成パラメータ</label>
+
+      <div class="param-field">
+        <div class="param-head">
+          <span class="param-name">Temperature</span>
+          <input
+            class="param-num"
+            type="number"
+            min="0"
+            max="2"
+            step="0.05"
+            :value="gen.temperature"
+            @input="setParam({ temperature: Number(($event.target as HTMLInputElement).value) })"
+          />
+        </div>
+        <input
+          class="param-range"
+          type="range"
+          min="0"
+          max="2"
+          step="0.05"
+          :value="gen.temperature"
+          @input="setParam({ temperature: Number(($event.target as HTMLInputElement).value) })"
+        />
+      </div>
+
+      <div class="param-field">
+        <div class="param-head">
+          <span class="param-name">Top P</span>
+          <input
+            class="param-num"
+            type="number"
+            min="0"
+            max="1"
+            step="0.05"
+            :value="gen.topP"
+            @input="setParam({ topP: Number(($event.target as HTMLInputElement).value) })"
+          />
+        </div>
+        <input
+          class="param-range"
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          :value="gen.topP"
+          @input="setParam({ topP: Number(($event.target as HTMLInputElement).value) })"
+        />
+      </div>
+
+      <label class="field-label">最大トークン数（空欄＝無制限）</label>
+      <input
+        class="text-input"
+        type="number"
+        min="1"
+        :value="gen.maxTokens ?? ''"
+        placeholder="無制限"
+        @input="setNullableParam('maxTokens', ($event.target as HTMLInputElement).value)"
+      />
+
+      <label class="field-label">シード（空欄＝ランダム）</label>
+      <input
+        class="text-input"
+        type="number"
+        :value="gen.seed ?? ''"
+        placeholder="ランダム"
+        @input="setNullableParam('seed', ($event.target as HTMLInputElement).value)"
+      />
+
+      <button class="action-btn" style="margin-top: 10px;" @click="settingsStore.resetGenerationParams()">
+        デフォルトに戻す
+      </button>
 
       <label class="field-label" style="margin-top: 24px;">TTS (音声読み上げ)</label>
       <div class="tts-row">
@@ -373,6 +466,44 @@ function handleImportFile(e: Event) {
   max-height: 150px;
   overflow-y: auto;
   color: var(--text-secondary);
+}
+
+.param-field {
+  margin-top: 12px;
+}
+
+.param-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.param-name {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.param-num {
+  width: 64px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 4px 8px;
+  font-size: 13px;
+  outline: none;
+  text-align: right;
+}
+
+.param-num:focus {
+  border-color: var(--accent);
+}
+
+.param-range {
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 .data-actions {

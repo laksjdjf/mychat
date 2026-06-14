@@ -1,4 +1,4 @@
-import type { LlmRequestMessage } from '../types'
+import type { GenerationParams, LlmRequestMessage } from '../types'
 
 export interface StreamChunk {
   content?: string
@@ -8,7 +8,8 @@ export interface StreamChunk {
 export async function* streamChatCompletion(
   endpoint: string,
   messages: LlmRequestMessage[],
-  signal: AbortSignal
+  signal: AbortSignal,
+  params: GenerationParams
 ): AsyncGenerator<StreamChunk> {
   const response = await fetch(`${endpoint}/v1/chat/completions`, {
     method: 'POST',
@@ -16,7 +17,11 @@ export async function* streamChatCompletion(
     body: JSON.stringify({
       messages,
       stream: true,
-      temperature: 0.8,
+      temperature: params.temperature,
+      top_p: params.topP,
+      // null の項目は送らずサーバー既定に任せる
+      ...(params.maxTokens != null ? { max_tokens: params.maxTokens } : {}),
+      ...(params.seed != null ? { seed: params.seed } : {}),
     }),
     signal,
   })

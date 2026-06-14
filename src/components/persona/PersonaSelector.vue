@@ -1,7 +1,19 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { usePersonaStore } from '../../stores/personaStore'
+import { useChatStore } from '../../stores/chatStore'
 
 const personaStore = usePersonaStore()
+const chatStore = useChatStore()
+
+const selectedPersonaId = computed(() =>
+  chatStore.activeSession?.personaId ?? personaStore.activePersonaId
+)
+
+const personaLocked = computed(() =>
+  (chatStore.activeSession?.messages.length ?? 0) > 0 &&
+  !!chatStore.activeSession?.personaId
+)
 
 function handleCreate() {
   const persona = personaStore.createPersona({
@@ -12,6 +24,18 @@ function handleCreate() {
     customFields: {},
   })
   personaStore.setActivePersona(persona.id)
+  const session = chatStore.activeSession
+  if (session && session.messages.length === 0) {
+    chatStore.setSessionPersona(session.id, persona.id)
+  }
+}
+
+function handleSelect(id: string) {
+  personaStore.setActivePersona(id)
+  const session = chatStore.activeSession
+  if (session && (session.messages.length === 0 || !session.personaId)) {
+    chatStore.setSessionPersona(session.id, id)
+  }
 }
 </script>
 
@@ -21,8 +45,10 @@ function handleCreate() {
     <div class="selector-row">
       <select
         class="persona-select"
-        :value="personaStore.activePersonaId"
-        @change="personaStore.setActivePersona(($event.target as HTMLSelectElement).value)"
+        :value="selectedPersonaId"
+        :disabled="personaLocked"
+        :title="personaLocked ? 'この会話のペルソナは固定されています' : undefined"
+        @change="handleSelect(($event.target as HTMLSelectElement).value)"
       >
         <option
           v-for="p in personaStore.personas"
@@ -81,5 +107,10 @@ function handleCreate() {
 
 .icon-btn:hover {
   background: var(--bg-tertiary);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 </style>

@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@400;500;600;700;800&display=swap');
+
 :root {
   --bg-primary: #ffffff;
   --bg-secondary: #f8f9fa;
@@ -10,7 +12,7 @@
   --msg-assistant-bg: #f8f9fa;
   --danger: #e03131;
 
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: 'Shippori Mincho', 'Hiragino Mincho ProN', 'Yu Mincho', serif;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;

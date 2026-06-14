@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, nextTick } from 'vue'
 import { useChatStore } from '../../stores/chatStore'
-import { usePersonaStore } from '../../stores/personaStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTts } from '../../composables/useTts'
+import { useChatPersona } from '../../composables/useChatPersona'
+import { parseThinking } from '../../utils/parseThinking'
 import { marked } from 'marked'
+import { sanitizeHtml } from '../../utils/sanitizeHtml'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -18,13 +20,14 @@ const emit = defineEmits<{
 }>()
 
 const chatStore = useChatStore()
-const personaStore = usePersonaStore()
+const { persona, ttsPersonaId } = useChatPersona()
 
 // 最新のassistantメッセージ
 const lastAssistant = computed(() => {
   const msgs = chatStore.activeMessages
   for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i].role === 'assistant') return msgs[i]
+    const msg = msgs[i]
+    if (msg?.role === 'assistant') return msg
   }
   return null
 })
@@ -33,19 +36,13 @@ const lastAssistant = computed(() => {
 const dialogueText = computed(() => {
   const msg = lastAssistant.value
   if (!msg) return ''
-  if (msg.reasoning !== undefined) return msg.content
-  const stripped = msg.content
-    .replace(/^<think>[\s\S]*?<\/think>\s*/, '')
-    .replace(/^<\|channel>thought[\s\S]*?<channel\|>\s*/, '')
-  return stripped || msg.content
+  return parseThinking(msg.content, msg.reasoning).answer || msg.content
 })
 
 const renderedDialogue = computed(() => {
   if (!dialogueText.value) return ''
-  return marked.parse(dialogueText.value) as string
+  return sanitizeHtml(marked.parse(dialogueText.value) as string)
 })
-
-const persona = computed(() => personaStore.activePersona)
 
 // 入力欄
 const input = ref('')
@@ -86,9 +83,9 @@ const thinkingText = computed(() => {
   if (!msg) return ''
   if (msg.reasoning !== undefined) return msg.reasoning
   const thinkMatch = msg.content.match(/^<think>([\s\S]*?)(<\/think>|$)/)
-  if (thinkMatch) return thinkMatch[1].trim()
+  if (thinkMatch) return (thinkMatch[1] ?? '').trim()
   const channelMatch = msg.content.match(/^<\|channel>thought\n?([\s\S]*?)(<channel\|>|$)/)
-  return channelMatch ? channelMatch[1].trim() : ''
+  return channelMatch ? (channelMatch[1] ?? '').trim() : ''
 })
 const settingsStore = useSettingsStore()
 const { isPlaying: ttsPlaying, currentMessageId: ttsCurrentMessageId, speak: ttsSpeak, respeak: ttsRespeak, stop: ttsStop } = useTts()
@@ -141,14 +138,14 @@ const isThinkingStreaming = computed(() => {
               <button
                 class="vn-tts-btn"
                 :class="{ 'vn-tts-btn--active': isTtsActive }"
-                @click="isTtsActive ? ttsStop() : ttsSpeak(dialogueText, lastAssistant!.id)"
+                @click="isTtsActive ? ttsStop() : ttsSpeak(dialogueText, lastAssistant!.id, ttsPersonaId)"
               >
                 <template v-if="isTtsActive">
                   <span class="tts-waves"><span class="w"/><span class="w"/><span class="w"/></span>
                 </template>
                 <template v-else>▶</template>
               </button>
-              <button class="vn-tts-btn" @click="ttsRespeak(dialogueText, lastAssistant!.id)" title="再生成">↺</button>
+              <button class="vn-tts-btn" @click="ttsRespeak(dialogueText, lastAssistant!.id, ttsPersonaId)" title="再生成">↺</button>
             </div>
           </div>
           <div

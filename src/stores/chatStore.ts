@@ -21,6 +21,14 @@ export const useChatStore = defineStore('chat', () => {
     localStorage.getItem(ACTIVE_KEY)
   )
 
+  function findSession(id: string): ChatSession | null {
+    return sessions.value.find((s) => s.id === id) ?? null
+  }
+
+  function getMessage(sessionId: string, messageId: string): Message | null {
+    return findSession(sessionId)?.messages.find((m) => m.id === messageId) ?? null
+  }
+
   function createNewSession(personaId: string | null = null): ChatSession {
     const session: ChatSession = {
       id: generateId(),
@@ -42,12 +50,11 @@ export const useChatStore = defineStore('chat', () => {
     !activeSessionId.value ||
     !sessions.value.find((s) => s.id === activeSessionId.value)
   ) {
-    activeSessionId.value = sessions.value[0].id
+    const first = sessions.value[0]
+    if (first) activeSessionId.value = first.id
   }
 
-  const activeSession = computed(() =>
-    sessions.value.find((s) => s.id === activeSessionId.value) ?? null
-  )
+  const activeSession = computed(() => activeSessionId.value ? findSession(activeSessionId.value) : null)
 
   const activeMessages = computed(() => activeSession.value?.messages ?? [])
 
@@ -61,7 +68,8 @@ export const useChatStore = defineStore('chat', () => {
       if (sessions.value.length === 0) {
         createNewSession()
       } else {
-        activeSessionId.value = sessions.value[0].id
+        const first = sessions.value[0]
+        if (first) activeSessionId.value = first.id
       }
     }
   }
@@ -74,9 +82,19 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function addMessage(msg: Omit<Message, 'id' | 'timestamp'>): Message {
-    const session = activeSession.value
-    if (!session) throw new Error('No active session')
+  function setSessionPersona(sessionId: string, personaId: string | null) {
+    const session = findSession(sessionId)
+    if (!session) return
+    session.personaId = personaId
+    session.updatedAt = Date.now()
+  }
+
+  function addMessageToSession(
+    sessionId: string,
+    msg: Omit<Message, 'id' | 'timestamp'>
+  ): Message {
+    const session = findSession(sessionId)
+    if (!session) throw new Error('No session')
     const message: Message = {
       id: generateId(),
       timestamp: Date.now(),
@@ -97,6 +115,12 @@ export const useChatStore = defineStore('chat', () => {
     return message
   }
 
+  function addMessage(msg: Omit<Message, 'id' | 'timestamp'>): Message {
+    const session = activeSession.value
+    if (!session) throw new Error('No active session')
+    return addMessageToSession(session.id, msg)
+  }
+
   function updateMessage(id: string, content: string) {
     const session = activeSession.value
     if (!session) return
@@ -114,6 +138,13 @@ export const useChatStore = defineStore('chat', () => {
     session.updatedAt = Date.now()
   }
 
+  function deleteMessageFromSession(sessionId: string, messageId: string) {
+    const session = findSession(sessionId)
+    if (!session) return
+    session.messages = session.messages.filter((m) => m.id !== messageId)
+    session.updatedAt = Date.now()
+  }
+
   function truncateFrom(messageId: string) {
     const session = activeSession.value
     if (!session) return
@@ -124,23 +155,21 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  function appendToLastAssistant(chunk: string) {
-    const session = activeSession.value
-    if (!session) return
-    const msgs = session.messages
-    const last = msgs[msgs.length - 1]
-    if (last && last.role === 'assistant') {
-      last.content += chunk
+  function appendToMessage(sessionId: string, messageId: string, chunk: string) {
+    const session = findSession(sessionId)
+    const message = getMessage(sessionId, messageId)
+    if (session && message?.role === 'assistant') {
+      message.content += chunk
+      session.updatedAt = Date.now()
     }
   }
 
-  function appendReasoningToLastAssistant(chunk: string) {
-    const session = activeSession.value
-    if (!session) return
-    const msgs = session.messages
-    const last = msgs[msgs.length - 1]
-    if (last && last.role === 'assistant') {
-      last.reasoning = (last.reasoning ?? '') + chunk
+  function appendReasoningToMessage(sessionId: string, messageId: string, chunk: string) {
+    const session = findSession(sessionId)
+    const message = getMessage(sessionId, messageId)
+    if (session && message?.role === 'assistant') {
+      message.reasoning = (message.reasoning ?? '') + chunk
+      session.updatedAt = Date.now()
     }
   }
 
@@ -165,15 +194,20 @@ export const useChatStore = defineStore('chat', () => {
     activeSessionId,
     activeSession,
     activeMessages,
+    findSession,
+    getMessage,
     setActiveSession,
     createNewSession,
     deleteSession,
     renameSession,
+    setSessionPersona,
     addMessage,
+    addMessageToSession,
     updateMessage,
     deleteMessage,
+    deleteMessageFromSession,
     truncateFrom,
-    appendToLastAssistant,
-    appendReasoningToLastAssistant,
+    appendToMessage,
+    appendReasoningToMessage,
   }
 })

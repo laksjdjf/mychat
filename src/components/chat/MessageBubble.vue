@@ -3,9 +3,11 @@ import { ref, nextTick, computed } from 'vue'
 import { marked } from 'marked'
 import type { Message } from '../../types'
 import { useChatStore } from '../../stores/chatStore'
-import { usePersonaStore } from '../../stores/personaStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTts } from '../../composables/useTts'
+import { useChatPersona } from '../../composables/useChatPersona'
+import { parseThinking } from '../../utils/parseThinking'
+import { sanitizeHtml } from '../../utils/sanitizeHtml'
 
 marked.setOptions({
   breaks: true,
@@ -22,7 +24,7 @@ const emit = defineEmits<{
 }>()
 
 const chatStore = useChatStore()
-const personaStore = usePersonaStore()
+const { persona: activePersona, ttsPersonaId } = useChatPersona()
 
 const isEditing = ref(false)
 const editContent = ref('')
@@ -56,7 +58,6 @@ function autoResize() {
   }
 }
 
-const activePersona = computed(() => personaStore.activePersona)
 const avatarUrl = computed(() => activePersona.value?.avatarUrl)
 const avatarObjectPosition = computed(() => {
   const fp = activePersona.value?.avatarFocalPoint
@@ -64,37 +65,14 @@ const avatarObjectPosition = computed(() => {
 })
 
 // reasoning フィールドまたは <think> タグを分離する
-const parsed = computed(() => {
-  // reasoning_content フィールドがある場合（優先）
-  if (props.message.reasoning !== undefined) {
-    return {
-      thinking: props.message.reasoning,
-      answer: props.message.content,
-      streaming: props.isGenerating && !props.message.content,
-    }
-  }
-  // タグ方式のフォールバック（複数フォーマット対応）
-  const content = props.message.content
-
-  // <think>...</think> 形式
-  const thinkClosed = content.match(/^<think>([\s\S]*?)<\/think>\s*([\s\S]*)$/)
-  if (thinkClosed) return { thinking: thinkClosed[1].trim(), answer: thinkClosed[2].trim(), streaming: false }
-  const thinkOpen = content.match(/^<think>([\s\S]*)$/)
-  if (thinkOpen) return { thinking: thinkOpen[1], answer: '', streaming: true }
-
-  // <|channel>thought...<channel|> 形式 (Qwen系)
-  const channelClosed = content.match(/^<\|channel>thought\n?([\s\S]*?)<channel\|>\n?([\s\S]*)$/)
-  if (channelClosed) return { thinking: channelClosed[1].trim(), answer: channelClosed[2].trim(), streaming: false }
-  const channelOpen = content.match(/^<\|channel>thought\n?([\s\S]*)$/)
-  if (channelOpen) return { thinking: channelOpen[1], answer: '', streaming: true }
-
-  return { thinking: null, answer: content, streaming: false }
-})
+const parsed = computed(() =>
+  parseThinking(props.message.content, props.message.reasoning, props.isGenerating)
+)
 
 const renderedAnswer = computed(() => {
   const text = parsed.value.answer
   if (!text) return ''
-  return marked.parse(text) as string
+  return sanitizeHtml(marked.parse(text) as string)
 })
 
 const showThinking = ref(false)
@@ -122,7 +100,7 @@ const settingsStore = useSettingsStore()
         <button
           class="tts-btn"
           :class="{ 'tts-btn--active': isTtsActive }"
-          @click="isTtsActive ? ttsStop() : ttsSpeak(parsed.answer, message.id)"
+          @click="isTtsActive ? ttsStop() : ttsSpeak(parsed.answer, message.id, ttsPersonaId)"
           :title="isTtsActive ? '停止' : '再生'"
         >
           <template v-if="isTtsActive">
@@ -132,7 +110,7 @@ const settingsStore = useSettingsStore()
         </button>
         <button
           class="tts-btn"
-          @click="ttsRespeak(parsed.answer, message.id)"
+          @click="ttsRespeak(parsed.answer, message.id, ttsPersonaId)"
           title="再生成"
         >↺</button>
       </template>
@@ -165,6 +143,12 @@ const settingsStore = useSettingsStore()
           </div>
         </div>
         <!-- 本文 -->
+        <div
+          v-if="message.role === 'assistant' && activePersona"
+          class="speaker-name"
+        >
+          {{ activePersona.name }}
+        </div>
         <div class="message-content markdown-body" v-html="renderedAnswer" />
         <span v-if="isGenerating && !parsed.streaming" class="cursor-blink">▌</span>
 
@@ -243,6 +227,13 @@ const settingsStore = useSettingsStore()
   word-break: break-word;
   font-size: 14px;
   line-height: 1.6;
+}
+
+.speaker-name {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
 }
 
 /* Markdown styles */

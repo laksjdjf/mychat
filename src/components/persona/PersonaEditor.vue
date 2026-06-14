@@ -1,11 +1,26 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { usePersonaStore } from '../../stores/personaStore'
+import { useChatStore } from '../../stores/chatStore'
+import { IRODORI_SPEAKER_EMBEDS } from '../../services/tts/irodoriChatWorkflow'
+import { fetchSpeakerEmbeds } from '../../services/tts/comfyProvider'
 
 const personaStore = usePersonaStore()
-const persona = computed(() => personaStore.activePersona)
+const chatStore = useChatStore()
+
+const persona = computed(() =>
+  personaStore.getPersonaById(chatStore.activeSession?.personaId) ?? personaStore.activePersona
+)
 
 const newFieldKey = ref('')
+
+// 声リストは ComfyUI から動的取得（取得できなければ固定リストにフォールバック）
+const speakerEmbeds = ref<readonly string[]>(IRODORI_SPEAKER_EMBEDS)
+onMounted(() => {
+  fetchSpeakerEmbeds()
+    .then((list) => { if (list.length) speakerEmbeds.value = list })
+    .catch(() => { /* ComfyUI未起動など → 固定フォールバックのまま */ })
+})
 
 // ── フォーカルポイントピッカー ──
 const pickerEl = ref<HTMLElement | null>(null)
@@ -174,14 +189,18 @@ function handleAvatarFile(e: Event) {
       rows="3"
     />
 
-    <!-- Ref WAV for TTS -->
-    <label class="field-label">参照音声パス (TTS)</label>
-    <input
+    <!-- TTS Voice (speaker embedding) -->
+    <label class="field-label">声 (TTS)</label>
+    <select
       class="text-input"
-      :value="persona.refWav ?? ''"
-      @input="updateField('refWav', ($event.target as HTMLInputElement).value)"
-      placeholder="/path/to/reference.wav"
-    />
+      :value="persona.ttsSpeakerEmbed ?? ''"
+      @change="updateField('ttsSpeakerEmbed', ($event.target as HTMLSelectElement).value)"
+    >
+      <option value="">（既定）</option>
+      <option v-for="embed in speakerEmbeds" :key="embed" :value="embed">
+        {{ embed.replace('.safetensors', '') }}
+      </option>
+    </select>
 
     <!-- Custom Fields -->
     <label class="field-label">カスタムフィールド</label>

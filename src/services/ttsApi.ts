@@ -1,23 +1,15 @@
-export async function fetchTtsAudio(
+import { synthesizeViaComfy, type ComfyVoice } from './tts/comfyProvider'
+
+export type { ComfyVoice }
+
+/**
+ * テキスト1行 → 音声(ArrayBuffer)。
+ * バックエンドは ComfyUI(Irodori-TTS)。再生エンジン(useTts)はこの関数だけに依存する。
+ */
+export function fetchTtsAudio(
   text: string,
-  refWav?: string
+  voice: ComfyVoice,
+  signal?: AbortSignal
 ): Promise<ArrayBuffer> {
-  const body: Record<string, unknown> = { text }
-  if (refWav) {
-    body.ref_wav = refWav
-  } else {
-    body.no_ref = true
-  }
-
-  const resp = await fetch('/tts', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  })
-
-  if (!resp.ok) {
-    throw new Error(`TTS error: ${resp.status} ${resp.statusText}`)
-  }
-
-  return resp.arrayBuffer()
+  return synthesizeViaComfy(text, voice, signal)
 }

@@ -1,7 +1,7 @@
 import { ref, readonly } from 'vue'
 import { useSettingsStore } from '../stores/settingsStore'
 import { usePersonaStore } from '../stores/personaStore'
-import { fetchTtsAudio } from '../services/ttsApi'
+import { fetchTtsAudio, type ComfyVoice } from '../services/ttsApi'
 
 // 2つ以上の改行で分割（（）の中身は改行1つに置換してから処理）
 function splitLines(text: string): string[] {
@@ -28,6 +28,7 @@ let audioCtx: AudioContext | null = null
 let currentSource: AudioBufferSourceNode | null = null
 let stopRequested = false
 let rafId: number | null = null
+let playbackRunId = 0
 
 function getAudioContext(): AudioContext {
   if (!audioCtx || audioCtx.state === 'closed') {
@@ -64,15 +65,17 @@ async function decodeBuffer(arrayBuffer: ArrayBuffer): Promise<AudioBuffer> {
   return ctx.decodeAudioData(arrayBuffer)
 }
 
-function playAudioBuffer(audioBuffer: AudioBuffer): Promise<void> {
+function playAudioBuffer(audioBuffer: AudioBuffer, runId: number): Promise<void> {
   const ctx = getAudioContext()
   return new Promise((resolve) => {
     const source = ctx.createBufferSource()
     source.buffer = audioBuffer
     source.connect(ctx.destination)
     source.onended = () => {
-      currentSource = null
-      stopProgress()
+      if (currentSource === source && playbackRunId === runId) {
+        currentSource = null
+        stopProgress()
+      }
       resolve()
     }
     currentSource = source
@@ -85,40 +88,62 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-async function speakLines(lines: string[], refWav?: string, messageId?: string): Promise<void> {
+async function speakLines(
+  lines: string[],
+  voice: ComfyVoice,
+  messageId: string | undefined,
+  runId: number
+): Promise<void> {
   isPlaying.value = true
   totalLines.value = lines.length
   currentMessageId.value = messageId ?? null
   stopRequested = false
 
   const cached = messageId ? audioCache.get(messageId) : undefined
+  const useCache = cached?.length === lines.length
 
   try {
-    // 全行のフェッチ+デコードを並列で開始（キャッシュあれば即 resolve）
-    const promises: Promise<AudioBuffer>[] = cached
-      ? cached.map((buf) => Promise.resolve(buf))
-      : lines.map((line) => fetchTtsAudio(line, refWav).then(decodeBuffer))
-
     const audioBuffers: AudioBuffer[] = []
+    const loadLine = (index: number): Promise<AudioBuffer> => {
+      const cachedBuffer = useCache ? cached[index] : undefined
+      if (cachedBuffer) return Promise.resolve(cachedBuffer)
 
-    // 先頭行から「その行が準備できた瞬間」に再生（後続は並列取得中）
-    for (let i = 0; i < promises.length; i++) {
-      if (stopRequested) break
-      currentLine.value = i + 1
-      currentText.value = lines[i]
-      const buf = await promises[i]
-      audioBuffers.push(buf)
-      if (stopRequested) break
-      await playAudioBuffer(buf)
-      if (i < promises.length - 1 && !stopRequested) await sleep(1000)
+      const line = lines[index]
+      if (line === undefined) return Promise.reject(new Error('Missing TTS line'))
+      return fetchTtsAudio(line, voice).then(decodeBuffer)
     }
 
-    if (messageId && audioBuffers.length === lines.length) {
+    // 1行目の生成を先行開始。以降は再生中に次行を先読みして行間の待ちを隠す。
+    let nextLoad: Promise<AudioBuffer> | null = loadLine(0)
+
+    for (let i = 0; i < lines.length; i++) {
+      if (stopRequested || playbackRunId !== runId) {
+        nextLoad?.catch(() => {}) // 中断時、未使用の先読みの未処理リジェクトを抑制
+        break
+      }
+      currentLine.value = i + 1
+      currentText.value = lines[i] ?? ''
+
+      const buf = await nextLoad!
+      audioBuffers.push(buf)
+
+      // 再生に入る前に次行の生成を投げておく（ComfyUIキューで先に処理させる）
+      const following = i + 1 < lines.length ? loadLine(i + 1) : null
+      following?.catch(() => {})
+      nextLoad = following
+
+      if (stopRequested || playbackRunId !== runId) break
+      await playAudioBuffer(buf, runId)
+      if (i < lines.length - 1 && !stopRequested && playbackRunId === runId) await sleep(1000)
+    }
+
+    if (messageId && audioBuffers.length === lines.length && playbackRunId === runId) {
       audioCache.set(messageId, audioBuffers)
     }
   } catch (e) {
     console.error('[TTS]', e)
   } finally {
+    if (playbackRunId !== runId) return
     isPlaying.value = false
     currentLine.value = 0
     totalLines.value = 0
@@ -133,21 +158,25 @@ export function useTts() {
   const settingsStore = useSettingsStore()
   const personaStore = usePersonaStore()
 
-  function speak(text: string, messageId?: string): void {
+  function speak(text: string, messageId?: string, personaId?: string | null): void {
     if (!settingsStore.ttsEnabled) return
     const lines = splitLines(text)
     if (lines.length === 0) return
-    const refWav = personaStore.activePersona?.refWav || undefined
-    speakLines(lines, refWav, messageId)
+    stop()
+    const runId = ++playbackRunId
+    const persona = personaStore.getPersonaById(personaId) ?? personaStore.activePersona
+    const voice: ComfyVoice = { speakerEmbed: persona?.ttsSpeakerEmbed || undefined }
+    speakLines(lines, voice, messageId, runId)
   }
 
-  function respeak(text: string, messageId?: string): void {
+  function respeak(text: string, messageId?: string, personaId?: string | null): void {
     if (!settingsStore.ttsEnabled) return
     if (messageId) audioCache.delete(messageId)
-    speak(text, messageId)
+    speak(text, messageId, personaId)
   }
 
   function stop(): void {
+    playbackRunId += 1
     stopRequested = true
     stopProgress()
     if (currentSource) {

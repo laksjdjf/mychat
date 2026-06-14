@@ -7,9 +7,9 @@ const llamaHost = process.env.LLAMA_HOST || 'localhost'
 const llamaPort = process.env.LLAMA_PORT || '8080'
 const llamaTarget = `http://${llamaHost}:${llamaPort}`
 
-const ttsHost = process.env.TTS_HOST || 'localhost'
-const ttsPort = process.env.TTS_PORT || '8000'
-const ttsTarget = `http://${ttsHost}:${ttsPort}`
+const comfyHost = process.env.COMFY_HOST || 'localhost'
+const comfyPort = process.env.COMFY_PORT || '8188'
+const comfyTarget = `http://${comfyHost}:${comfyPort}`
 
 const DATA_DIR = path.resolve(__dirname, 'data')
 const PERSONAS_DIR = path.join(DATA_DIR, 'personas')
@@ -110,9 +110,16 @@ export default defineConfig({
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/api/, ''),
       },
-      '/tts': {
-        target: ttsTarget,
+      '/comfy': {
+        target: comfyTarget,
         changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/comfy/, ''),
+        // ComfyUIはHostとOriginの不一致を403で弾くため、Originも書き換える
+        configure: (proxy) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setHeader('origin', comfyTarget)
+          })
+        },
       },
     },
   },

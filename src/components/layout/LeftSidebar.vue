@@ -24,6 +24,14 @@ function finishRename() {
 function handleNewChat() {
   chatStore.createNewSession(personaStore.activePersonaId)
 }
+
+function handleSelectSession(id: string) {
+  chatStore.setActiveSession(id)
+  const personaId = chatStore.findSession(id)?.personaId
+  if (personaId && personaStore.getPersonaById(personaId)) {
+    personaStore.setActivePersona(personaId)
+  }
+}
 </script>
 
 <template>
@@ -38,7 +46,7 @@ function handleNewChat() {
         :key="session.id"
         class="session-item"
         :class="{ active: session.id === chatStore.activeSessionId }"
-        @click="chatStore.setActiveSession(session.id)"
+        @click="handleSelectSession(session.id)"
         @dblclick="startRename(session.id, session.name)"
       >
         <template v-if="editingId === session.id">
