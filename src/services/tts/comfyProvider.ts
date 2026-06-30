@@ -1,4 +1,5 @@
 import { generateId } from '../../utils/id'
+import type { SpeakerMix } from '../../types'
 import { irodoriChatWorkflow, IRODORI_CHAT_NODES } from './irodoriChatWorkflow'
 import type { ComfyWorkflow } from './types'
 
@@ -10,11 +11,11 @@ const POLL_INTERVAL_MS = 250
 const TIMEOUT_MS = 180_000 // コールドロード(初回~12s)に余裕を持たせる
 
 export interface ComfyVoice {
-  /** speaker embedding 名（未指定ならワークフロー既定） */
-  speakerEmbed?: string
-  /** 声トークン選択シード（声色の再現性。未指定なら既定） */
-  voiceSeed?: number
+  /** 声（最大4つ）。空ならワークフロー既定 */
+  speakers?: SpeakerMix[]
 }
+
+const MERGE_SLOTS = ['a', 'b', 'c', 'd'] as const
 
 interface AudioRef {
   filename: string
@@ -29,23 +30,59 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-// ワークフローを複製し、テキスト・声・seed をノードIDで差し込む
+// ワークフローを複製し、テキスト・声・noise seed をノードIDで差し込む
 function buildWorkflow(text: string, voice: ComfyVoice): ComfyWorkflow {
   const wf = structuredClone(irodoriChatWorkflow)
   const N = IRODORI_CHAT_NODES
 
   const textNode = wf[N.text]
-  const embedNode = wf[N.speakerEmbed]
-  const voiceSeedNode = wf[N.voiceSeed]
   const noiseNode = wf[N.noiseSeed]
 
   if (textNode) textNode.inputs.value = text
-  if (embedNode && voice.speakerEmbed) embedNode.inputs.embed_name = voice.speakerEmbed
-  if (voiceSeedNode && voice.voiceSeed != null) voiceSeedNode.inputs.seed = voice.voiceSeed
   // 生成ゆらぎは毎回ランダム（同じ行でも再生成で別テイクになる）
   if (noiseNode) noiseNode.inputs.noise_seed = Math.floor(Math.random() * 2 ** 31)
 
+  applySpeakers(wf, voice.speakers ?? [])
+
   return wf
+}
+
+// 声の数に応じて話者チェーンを組み立てる:
+//   1声  → SpeakerEmbedLoader
+//   2-4声 → SpeakerEmbedLoader×N → SpeakerEmbedMerge(concat,重み)
+function applySpeakers(wf: ComfyWorkflow, speakers: SpeakerMix[]): void {
+  const N = IRODORI_CHAT_NODES
+  const picks = speakers.filter((s) => s.embed).slice(0, 4)
+  if (picks.length === 0) return // 声未指定 → ベースのローダ(28)のまま（既定解決は呼び出し側）
+
+  // ベースの単一ローダ(28)を消し、動的に作り直す
+  delete wf[N.speakerEmbed]
+
+  const mergeInputs: Record<string, unknown> = { mode: 'concat' }
+  picks.forEach((s, i) => {
+    const loaderId = `spk${i}`
+    wf[loaderId] = { class_type: 'IrodoriSpeakerEmbedLoader', inputs: { embed_name: s.embed } }
+    const slot = MERGE_SLOTS[i]!
+    mergeInputs[`speaker_embed_${slot}`] = [loaderId, 0]
+    mergeInputs[`weight_${slot}`] = s.weight ?? 1
+  })
+
+  let source: [string, number]
+  if (picks.length === 1) {
+    source = ['spk0', 0]
+  } else {
+    wf['spkmerge'] = { class_type: 'IrodoriSpeakerEmbedMerge', inputs: mergeInputs }
+    source = ['spkmerge', 0]
+  }
+
+  setSpeakerSource(wf, source)
+}
+
+function setSpeakerSource(wf: ComfyWorkflow, source: [string, number]): void {
+  for (const nodeId of ['22', '36']) {
+    const node = wf[nodeId]
+    if (node) node.inputs.speaker_embed = source
+  }
 }
 
 // /history をポーリングして出力音声の参照を得る
@@ -106,11 +143,12 @@ export async function synthesizeViaComfy(
   signal?: AbortSignal
 ): Promise<ArrayBuffer> {
   // 声未指定なら ComfyUI から取得した先頭の声を既定にする（名前をソースに持たない）
-  let speakerEmbed = voice.speakerEmbed
-  if (!speakerEmbed) {
-    speakerEmbed = (await fetchSpeakerEmbeds().catch(() => []))[0]
+  let speakers = voice.speakers?.filter((s) => s.embed) ?? []
+  if (speakers.length === 0) {
+    const first = (await fetchSpeakerEmbeds().catch(() => []))[0]
+    if (first) speakers = [{ embed: first, weight: 1 }]
   }
-  const effectiveVoice: ComfyVoice = { ...voice, speakerEmbed }
+  const effectiveVoice: ComfyVoice = { ...voice, speakers }
 
   const promptRes = await fetch(`${BASE}/prompt`, {
     method: 'POST',

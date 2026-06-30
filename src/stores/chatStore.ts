@@ -74,6 +74,11 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
+  function clearAllSessions() {
+    sessions.value = []
+    createNewSession() // 空のままだと壊れるので新規を1つ作ってアクティブに
+  }
+
   function renameSession(id: string, name: string) {
     const session = sessions.value.find((s) => s.id === id)
     if (session) {
@@ -199,6 +204,7 @@ export const useChatStore = defineStore('chat', () => {
     setActiveSession,
     createNewSession,
     deleteSession,
+    clearAllSessions,
     renameSession,
     setSessionPersona,
     addMessage,

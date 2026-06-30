@@ -3,7 +3,7 @@
 // 元になった ComfyUI ワークフロー `irodori-tts.json` から、チャット向けに以下を調整:
 //   - AnimeWhisper の文字起こし(QA)ブランチを削除
 //   - IrodoriEmptyLatent.batch_size を 4 → 1
-//   - 話者埋め込みを単一(IrodoriSpeakerEmbedLoader)に簡素化（キャラ＝声1つ）
+//   - 話者埋め込みを直接 IrodoriEmptyLatent / IrodoriTextEncode に接続
 //   - 出力を SaveAudio(FLAC, deprecated) → SaveAudioMP3(320k) に変更
 //     （FLAC は Firefox の decodeAudioData で再生不可のことがあるため）
 //
@@ -13,7 +13,7 @@
 //
 // 投入の流れ:
 //   1. このワークフローを深いコピー
-//   2. IRODORI_CHAT_NODES のノードへ text / 話者 / seed をパッチ（下記参照）
+//   2. IRODORI_CHAT_NODES のノードへ text / 話者 / noise seed をパッチ（下記参照）
 //   3. POST /comfy/prompt { prompt, client_id }
 //   4. /comfy/history/{prompt_id} をポーリングし done を待つ
 //   5. outputs[OUTPUT].audio[0] の {filename, subfolder, type} を取得
@@ -30,8 +30,6 @@ export const IRODORI_CHAT_NODES = {
   text: '21',
   /** IrodoriSpeakerEmbedLoader.embed_name — キャラの声（models/speaker_embeddings/*.safetensors） */
   speakerEmbed: '28',
-  /** IrodoriSpeakerEmbedSampleTokens.seed — 声トークンの選択シード（声色の再現性） */
-  voiceSeed: '49',
   /** RandomNoise.noise_seed — 生成のゆらぎ（再生成時に変えると別テイクになる） */
   noiseSeed: '7',
   /** SaveAudioMP3 — 完成音声の出力ノード。/history からこのノードの audio を読む */
@@ -110,7 +108,7 @@ export const irodoriChatWorkflow: ComfyWorkflow = {
       batch_size: 1,
       model: ['18', 0],
       vae: ['18', 1],
-      speaker_embed: ['49', 0],
+      speaker_embed: ['28', 0],
     },
   },
   '28': {
@@ -126,7 +124,7 @@ export const irodoriChatWorkflow: ComfyWorkflow = {
       speaker_uncond_mode: 'mask',
       caption: '',
       model: ['18', 0],
-      speaker_embed: ['49', 0],
+      speaker_embed: ['28', 0],
     },
   },
   '38': {
@@ -138,9 +136,5 @@ export const irodoriChatWorkflow: ComfyWorkflow = {
       vae: ['18', 1],
       samples: ['6', 1],
     },
-  },
-  '49': {
-    class_type: 'IrodoriSpeakerEmbedSampleTokens',
-    inputs: { num_tokens: 16, seed: 31, keep_first_token: false, speaker_embed: ['28', 0] },
   },
 }

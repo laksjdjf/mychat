@@ -9,8 +9,12 @@ const showRightPanel = ref(true)
 const isMobile = ref(false)
 
 function checkMobile() {
-  isMobile.value = window.innerWidth < 768
-  if (isMobile.value) {
+  const nowMobile = window.innerWidth < 768
+  // 幅のブレークポイントが変わっていなければ何もしない。
+  // （スマホでキーボードが開くと高さ変化でresizeが飛ぶが、その度にパネルを閉じない）
+  if (nowMobile === isMobile.value) return
+  isMobile.value = nowMobile
+  if (nowMobile) {
     showLeftSidebar.value = false
     showRightPanel.value = false
   }

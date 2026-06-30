@@ -32,6 +32,12 @@ function handleSelectSession(id: string) {
     personaStore.setActivePersona(personaId)
   }
 }
+
+function handleClearAll() {
+  if (confirm('すべてのチャット履歴を削除します。元に戻せません。よろしいですか？')) {
+    chatStore.clearAllSessions()
+  }
+}
 </script>
 
 <template>
@@ -72,6 +78,9 @@ function handleSelectSession(id: string) {
           </button>
         </template>
       </div>
+    </div>
+    <div v-if="chatStore.sessions.length > 0" class="sidebar-footer">
+      <button class="clear-all-btn" @click="handleClearAll">履歴を全削除</button>
     </div>
   </div>
 </template>
@@ -173,5 +182,27 @@ function handleSelectSession(id: string) {
 
 .icon-btn:hover {
   background: var(--bg-tertiary);
+}
+
+.sidebar-footer {
+  flex-shrink: 0;
+  padding: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.clear-all-btn {
+  width: 100%;
+  padding: 8px;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.clear-all-btn:hover {
+  border-color: var(--danger);
+  color: var(--danger);
 }
 </style>

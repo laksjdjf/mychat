@@ -126,7 +126,7 @@ speak(text, messageId, personaId)
   └─ テキストを二重改行・括弧無視で分割 (splitLines)
   └─ persona.ttsSpeakerEmbed を声(ComfyVoice)に
   └─ 各行を fetchTtsAudio → comfyProvider.synthesizeViaComfy
-  │     └─ irodoriChatWorkflow を複製しノードIDで text/声/seed をパッチ
+  │     └─ irodoriChatWorkflow を複製しノードIDで text/声/noise seed をパッチ
   │     └─ POST /comfy/prompt → /comfy/history ポーリング → /comfy/view でMP3取得
   └─ Web Audio API で AudioBuffer にデコード
   └─ 順番に再生 (チャンク間1秒ポーズ)・再生中に次行を先読み

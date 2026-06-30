@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import type { SpeakerMix } from '../../types'
 import { usePersonaStore } from '../../stores/personaStore'
 import { useChatStore } from '../../stores/chatStore'
 import { IRODORI_SPEAKER_EMBEDS } from '../../services/tts/irodoriChatWorkflow'
 import { fetchSpeakerEmbeds } from '../../services/tts/comfyProvider'
+import { downscaleImage } from '../../utils/downscaleImage'
 
 const personaStore = usePersonaStore()
 const chatStore = useChatStore()
@@ -21,6 +23,33 @@ onMounted(() => {
     .then((list) => { if (list.length) speakerEmbeds.value = list })
     .catch(() => { /* ComfyUI未起動など → 固定フォールバックのまま */ })
 })
+
+// ── 声（最大4つブレンド） ──
+const voices = computed<SpeakerMix[]>(() => {
+  const p = persona.value
+  if (!p) return []
+  if (p.ttsVoices?.length) return p.ttsVoices
+  if (p.ttsSpeakerEmbed) return [{ embed: p.ttsSpeakerEmbed, weight: 1 }] // 旧データの移行
+  return []
+})
+
+function setVoices(next: SpeakerMix[]) {
+  if (!persona.value) return
+  personaStore.updatePersona(persona.value.id, { ttsVoices: next })
+}
+function addVoice() {
+  if (voices.value.length >= 4) return
+  setVoices([...voices.value, { embed: speakerEmbeds.value[0] ?? '', weight: 1 }])
+}
+function removeVoice(i: number) {
+  setVoices(voices.value.filter((_, idx) => idx !== i))
+}
+function setVoiceEmbed(i: number, embed: string) {
+  setVoices(voices.value.map((v, idx) => (idx === i ? { ...v, embed } : v)))
+}
+function setVoiceWeight(i: number, weight: number) {
+  setVoices(voices.value.map((v, idx) => (idx === i ? { ...v, weight } : v)))
+}
 
 // ── フォーカルポイントピッカー ──
 const pickerEl = ref<HTMLElement | null>(null)
@@ -105,8 +134,14 @@ function handleAvatarFile(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0]
   if (!file || !persona.value) return
   const reader = new FileReader()
-  reader.onload = () => {
-    personaStore.updatePersona(persona.value!.id, { avatarUrl: reader.result as string })
+  reader.onload = async () => {
+    const raw = reader.result as string
+    // 巨大画像をそのまま保存すると読み込み・描画が重くなるため縮小する
+    let avatarUrl = raw
+    try {
+      avatarUrl = await downscaleImage(raw)
+    } catch { /* 失敗時は元画像のまま */ }
+    if (persona.value) personaStore.updatePersona(persona.value.id, { avatarUrl })
   }
   reader.readAsDataURL(file)
 }
@@ -189,18 +224,33 @@ function handleAvatarFile(e: Event) {
       rows="3"
     />
 
-    <!-- TTS Voice (speaker embedding) -->
-    <label class="field-label">声 (TTS)</label>
-    <select
-      class="text-input"
-      :value="persona.ttsSpeakerEmbed ?? ''"
-      @change="updateField('ttsSpeakerEmbed', ($event.target as HTMLSelectElement).value)"
-    >
-      <option value="">（既定）</option>
-      <option v-for="embed in speakerEmbeds" :key="embed" :value="embed">
-        {{ embed.replace('.safetensors', '') }}
-      </option>
-    </select>
+    <!-- TTS Voice (speaker embeddings, 最大4つブレンド) -->
+    <label class="field-label">声 (TTS・最大4つブレンド)</label>
+    <div v-for="(v, i) in voices" :key="i" class="voice-row">
+      <select
+        class="text-input voice-embed"
+        :value="v.embed"
+        @change="setVoiceEmbed(i, ($event.target as HTMLSelectElement).value)"
+      >
+        <option v-for="embed in speakerEmbeds" :key="embed" :value="embed">
+          {{ embed.replace('.safetensors', '') }}
+        </option>
+      </select>
+      <input
+        v-if="voices.length > 1"
+        class="text-input voice-weight"
+        type="number"
+        min="0"
+        max="10"
+        step="0.1"
+        :value="v.weight"
+        @input="setVoiceWeight(i, Number(($event.target as HTMLInputElement).value))"
+        title="重み（ブレンド比）"
+      />
+      <button class="remove-btn" @click="removeVoice(i)" title="削除">×</button>
+    </div>
+    <button v-if="voices.length < 4" class="icon-btn voice-add" @click="addVoice">＋ 声を追加</button>
+    <p v-if="voices.length === 0" class="voice-hint">未選択（既定の声を使用）</p>
 
     <!-- Custom Fields -->
     <label class="field-label">カスタムフィールド</label>
@@ -403,6 +453,12 @@ function handleAvatarFile(e: Event) {
   box-sizing: border-box;
 }
 .text-area:focus { border-color: var(--accent); }
+
+.voice-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.voice-embed { flex: 1; }
+.voice-weight { width: 64px; flex-shrink: 0; text-align: right; }
+.voice-add { margin-top: 2px; }
+.voice-hint { margin: 4px 0 0; font-size: 11px; color: var(--text-secondary); }
 
 .custom-field { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .custom-key { font-size: 12px; color: var(--accent); min-width: 60px; font-family: monospace; }

@@ -6,6 +6,7 @@ import { usePersonaStore } from '../../stores/personaStore'
 import { useChatStore } from '../../stores/chatStore'
 import PersonaEditor from '../persona/PersonaEditor.vue'
 import PersonaSelector from '../persona/PersonaSelector.vue'
+import { downscaleImage } from '../../utils/downscaleImage'
 
 const settingsStore = useSettingsStore()
 const personaStore = usePersonaStore()
@@ -76,6 +77,33 @@ function exportData() {
   a.download = `mychat-${new Date().toISOString().slice(0, 10)}.json`
   a.click()
   URL.revokeObjectURL(url)
+}
+
+// 既存アバターの一括最適化（巨大base64を縮小して読み込み・描画を軽くする）
+const optimizing = ref(false)
+const optimizeStatus = ref('')
+
+async function optimizeAvatars() {
+  if (optimizing.value) return
+  optimizing.value = true
+  const targets = personaStore.personas.filter((p) => p.avatarUrl?.startsWith('data:'))
+  let done = 0
+  let savedBytes = 0
+  for (const p of targets) {
+    try {
+      const before = p.avatarUrl.length
+      const smaller = await downscaleImage(p.avatarUrl)
+      if (smaller.length < before) {
+        personaStore.updatePersona(p.id, { avatarUrl: smaller })
+        savedBytes += before - smaller.length
+      }
+    } catch { /* この1件はスキップ */ }
+    done++
+    optimizeStatus.value = `最適化中… ${done}/${targets.length}`
+  }
+  const savedMb = (savedBytes / 1024 / 1024).toFixed(1)
+  optimizeStatus.value = `完了：${targets.length}件、約${savedMb}MB 削減`
+  optimizing.value = false
 }
 
 // Import
@@ -302,6 +330,13 @@ function handleImportFile(e: Event) {
         </label>
       </div>
       <p class="data-hint">ペルソナとテンプレートを1つのJSONファイルで保存・読み込みできます。</p>
+
+      <label class="field-label" style="margin-top: 24px;">アバター最適化</label>
+      <button class="action-btn" @click="optimizeAvatars" :disabled="optimizing">
+        {{ optimizing ? '最適化中…' : 'アバターを軽量化' }}
+      </button>
+      <p v-if="optimizeStatus" class="data-hint">{{ optimizeStatus }}</p>
+      <p class="data-hint">巨大な画像アバターを縮小して、読み込みと表示を軽くします（スマホで重い時に）。</p>
     </div>
   </div>
 </template>

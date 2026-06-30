@@ -29,9 +29,15 @@ function scrollToBottom() {
   })
 }
 
-// Auto-scroll when new messages arrive or content updates
+// Auto-scroll when new messages arrive or content updates.
+// 会話全体を連結すると履歴が伸びるほど毎トークン重くなるため、
+// 「メッセージ数 + 最後の1通の長さ」だけを監視シグナルにする（O(1)）。
 watch(
-  () => chatStore.activeMessages.map((m) => m.content).join(''),
+  () => {
+    const msgs = chatStore.activeMessages
+    const last = msgs[msgs.length - 1]
+    return `${msgs.length}:${last ? last.content.length : 0}`
+  },
   () => {
     if (isNearBottom()) {
       scrollToBottom()

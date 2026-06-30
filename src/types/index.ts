@@ -15,6 +15,12 @@ export interface ChatSession {
   updatedAt: number
 }
 
+// 1つの声（speaker embedding）とマージ時の重み
+export interface SpeakerMix {
+  embed: string // speaker embedding 名（例: xxx.safetensors）
+  weight: number // concatマージ時の寄与（per-voice gain）。1.0が基準
+}
+
 export interface Persona {
   id: string
   name: string
@@ -22,7 +28,8 @@ export interface Persona {
   scenario: string
   avatarUrl: string
   avatarFocalPoint?: { x: number; y: number } // チャット用トリミング位置 (0-100%)
-  ttsSpeakerEmbed?: string // TTSの声（ComfyUI Irodori-TTS の speaker embedding 名）
+  ttsVoices?: SpeakerMix[] // TTSの声（最大4つブレンド）。ComfyUI Irodori-TTS の speaker embedding
+  ttsSpeakerEmbed?: string // (旧) 単一指定。ttsVoices が無い場合のフォールバック
   customFields: Record<string, string>
 }
 

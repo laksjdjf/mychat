@@ -165,7 +165,12 @@ export function useTts() {
     stop()
     const runId = ++playbackRunId
     const persona = personaStore.getPersonaById(personaId) ?? personaStore.activePersona
-    const voice: ComfyVoice = { speakerEmbed: persona?.ttsSpeakerEmbed || undefined }
+    const speakers = persona?.ttsVoices?.length
+      ? persona.ttsVoices
+      : persona?.ttsSpeakerEmbed
+        ? [{ embed: persona.ttsSpeakerEmbed, weight: 1 }]
+        : []
+    const voice: ComfyVoice = { speakers }
     speakLines(lines, voice, messageId, runId)
   }
 
